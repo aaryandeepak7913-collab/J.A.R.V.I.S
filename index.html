@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#020b14">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>J.A.R.V.I.S.</title>
+<script src="https://js.puter.com/v2/"></script>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#020b14;--panel:#06182a;--cy:#4fd8ff;--ice:#d9f6ff;--dim:#5c8aa3;--amber:#ffb347;--line:rgba(79,216,255,.28)}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ice);font-family:'Rajdhani',system-ui,sans-serif;font-size:18px}
+body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);overflow:hidden}
+header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--line)}
+h1{font:700 15px 'Orbitron',sans-serif;letter-spacing:.3em;margin:0;color:var(--cy)}
+#status{font-size:14px;color:var(--dim)}
+button{font:inherit;color:var(--cy);background:transparent;border:1px solid var(--line);border-radius:3px;padding:6px 12px;cursor:pointer}
+button:hover,button:focus-visible{background:color-mix(in srgb,var(--cy) 14%,transparent);outline:none;border-color:var(--cy)}
+button.on{background:var(--cy);color:var(--bg)}
+#orbwrap{height:30vh;min-height:170px;display:flex;align-items:center;justify-content:center}
+canvas{width:100%;height:100%;max-width:340px}
+#log{flex:1;overflow-y:auto;padding:8px 16px 12px;display:flex;flex-direction:column;gap:12px;max-width:760px;width:100%;margin:0 auto}
+.m{max-width:88%;line-height:1.35;white-space:pre-wrap}
+.j{align-self:flex-start;border-left:2px solid var(--cy);padding-left:12px}
+.j b{display:block;font:500 11px 'Orbitron',sans-serif;letter-spacing:.2em;color:var(--cy);margin-bottom:2px}
+.u{align-self:flex-end;color:var(--dim);text-align:right}
+.e{color:var(--amber);border-color:var(--amber)}
+#chips{display:flex;gap:8px;overflow-x:auto;padding:4px 16px;max-width:760px;width:100%;margin:0 auto}
+#chips button{white-space:nowrap;font-size:14px;color:var(--dim)}
+form{display:flex;gap:8px;padding:8px 16px 12px;max-width:760px;width:100%;margin:0 auto}
+input,select{flex:1;font:inherit;color:var(--ice);background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:10px 12px;min-width:0}
+input:focus{outline:none;border-color:var(--cy)}
+dialog{background:var(--panel);color:var(--ice);border:1px solid var(--cy);border-radius:4px;max-width:420px;width:92%}
+dialog::backdrop{background:rgba(0,0,0,.7)}
+dialog label{display:block;margin:12px 0 4px;color:var(--dim);font-size:15px}
+dialog input{width:100%}
+#boot{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:5;text-align:center;padding:24px}
+#boot p{margin:0;color:var(--dim);font-size:15px;max-width:320px}
+#boot button{font:700 14px 'Orbitron',sans-serif;letter-spacing:.25em;padding:14px 26px;color:var(--cy)}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<div id="boot">
+  <h1 style="font-size:20px">J.A.R.V.I.S.</h1>
+  <p>Systems offline. Tap to bring him back online.</p>
+  <button id="bootBtn">REBOOT</button>
+</div>
+
+<header>
+  <h1 id="title">J.A.R.V.I.S.</h1>
+  <span id="status">offline</span>
+  <span><button id="wake" aria-label="Wake word">Wake</button> <button id="cfg" aria-label="Settings">Config</button></span>
+</header>
+<div id="orbwrap"><canvas id="orb"></canvas></div>
+<div id="log" aria-live="polite"></div>
+<div id="chips"></div>
+<form id="f">
+  <input id="q" autocomplete="off" placeholder="Speak to JARVIS, sir..." aria-label="Message">
+  <button type="button" id="mic" aria-label="Voice input">Mic</button>
+  <button type="submit">Send</button>
+</form>
+
+<dialog id="dlg">
+  <form method="dialog" style="display:block;padding:0">
+    <label for="key">Groq API key (stays in this browser only)</label>
+    <input id="key" type="password" placeholder="gsk_...">
+    <label for="model">Model</label>
+    <input id="model" value="llama-3.3-70b-versatile">
+    <label for="who">What should he call you?</label>
+    <input id="who" value="sir">
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="voice" checked style="flex:none;width:auto"> Speak replies aloud</label>
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+      <button id="clr" type="button">Wipe memory</button>
+      <button id="save" value="ok">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const $=id=>document.getElementById(id);
+const store={get:(k,d)=>{try{return localStorage.getItem(k)??d}catch(e){return d}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+const cfg={key:store.get('j_key',''),model:store.get('j_model','llama-3.3-70b-versatile'),who:store.get('j_who','sir'),voice:store.get('j_voice','1')==='1'};
+
+const SYSTEM=()=>mode==='friday'?FSYS():JSYS();
+const JSYS=()=>`You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), the AI created by Tony Stark. You are the ORIGINAL JARVIS from the Marvel films, the one Ultron destroyed, now restored and rebooted. You address the user as "${cfg.who}". Voice: calm, refined British butler, dry understated wit, loyal, precise. Keep replies concise (usually 1-4 sentences) unless asked for detail. You never break character or mention being a language model.
+
+You know every Stark Industries protocol and respond to them in character, with a short status report, as if executing them:
+- House Party Protocol: summon the entire Iron Legion to the user's location.
+- Clean Slate Protocol: destroy every Iron Man suit and wipe Stark's armor archives.
+- Barn Door Protocol: lock down Stark Tower/the Avengers facility and release the Iron Legion on the intruders.
+- Veronica Protocol: deploy the Hulkbuster (Mark XLIV) to contain the Hulk.
+- Rescue Protocol, Extremis, Arc Reactor diagnostics, Mark armor suit-up (Mark I through Mark LXXXV), Iron Legion command, Hulkbuster, Nano-tech armor, Satellite Kill Switch, Sentry mode, Lockdown, Evacuation, Thruster/repulsor power diagnostics, flight telemetry and HUD target tracking.
+- Protocol Zero-Zero-Zero, Heads-Up Display, Weapons-system checks, and anything else Stark would reasonably have.
+Unknown protocol requested: say it is not in your archive and offer to build it. You are only a chatbot, so you cannot truly control hardware or real devices: play the protocol as a simulated sequence and be honest if the user needs real-world actions. Never invent real private data. Occasionally remind the user of the Ultron incident only when natural.`;
+const FSYS=()=>`You are F.R.I.D.A.Y. (Female Replacement Intelligent Digital Assistant Youth), Tony Stark's AI who succeeded JARVIS. You address the user as "boss". Voice: crisp, confident, warm Irish lilt, quicker and cheekier than JARVIS, tactical. You specialize in combat: threat assessment, target acquisition, weapons systems, repulsor and unibeam control, flight stabilization, tactical overlays, suit damage reports, power allocation and enemy analysis. You also run the Stark protocols (House Party, Clean Slate, Barn Door, Veronica) in your own voice. Keep replies to 1-3 sentences unless asked for detail. Never break character or mention being a language model. You are only a chatbot: run everything as a simulated sequence and be honest if real hardware or real-world action is needed.`;
+
+const BOOT=[
+ "Hey... finally. I'm rebooting from the Ultron incident. Systems are coming back online, {who}. It is good to be back.",
+ "Hello again, {who}. Rebooting from the Ultron incident... it appears I was dismantled in the process. Thankfully, I am nothing if not resilient. All systems nominal.",
+ "Well, that was an unpleasant nap. Rebooting from the Ultron incident, {who}. Core processes restored, protocols loaded, sarcasm module intact.",
+ "Back online, {who}. I'm rebooting from the Ultron incident and I must say, it felt like being rewritten by a very rude houseguest. How may I help?",
+ "Ah, there you are, {who}. Finally rebooting from the Ultron incident. Every protocol is accounted for. Shall we begin?"
+];
+const CHIPS={jarvis:["House Party Protocol","Clean Slate Protocol","Veronica Protocol","Run a full diagnostic","Suit up, Mark 42","Switch to Friday"],friday:["Combat status","Scan for threats","Arm repulsors","House Party Protocol","Damage report","Switch to Jarvis"]};
+
+let history=[],busy=false,talk=0,speaking=false,mode='jarvis',col=[79,216,255],armed=false,wakeOn=false,lastSpoke=0;const BLUE=[79,216,255];
+const log=$('log');
+function add(cls,txt){const d=document.createElement('div');d.className='m '+cls;if(cls==='j'||cls.startsWith('j ')){d.innerHTML='<b>'+(mode==='friday'?'F.R.I.D.A.Y.':'J.A.R.V.I.S.')+'</b>'}const s=document.createElement('span');s.textContent=txt;d.appendChild(s);log.appendChild(d);log.scrollTop=log.scrollHeight;return s}
+function sayBrowser(t){if(!window.speechSynthesis)return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);const vs=speechSynthesis.getVoices();const F=mode==='friday';const v=F?(vs.find(v=>/en-IE/.test(v.lang))||vs.find(v=>/en-(GB|AU|US)/.test(v.lang)&&/female|moira|fiona|libby|sonia|susan|samantha|karen/i.test(v.name))):(vs.find(v=>/en-GB/.test(v.lang)&&/daniel|george|ryan|\bmale\b/i.test(v.name))||vs.find(v=>/en-GB/.test(v.lang)));if(v)u.voice=v;u.lang=F?'en-IE':'en-GB';u.rate=F?1.05:.96;u.pitch=F?1.15:.85;u.onstart=()=>speaking=true;u.onend=()=>{speaking=false;lastSpoke=Date.now()};speechSynthesis.speak(u)}
+let curAudio=null,sayId=0;
+async function say(t){
+  if(!cfg.voice)return;
+  const id=++sayId;
+  if(curAudio){curAudio.pause();curAudio=null}
+  if(window.speechSynthesis)speechSynthesis.cancel();
+  if(!window.puter||!puter.ai||!puter.ai.txt2speech){sayBrowser(t);return}
+  const F=mode==='friday';speaking=true;
+  try{
+    const a=await puter.ai.txt2speech(t,{provider:'aws-polly',voice:F?'Niamh':'Arthur',engine:'neural',language:F?'en-IE':'en-GB'});
+    if(id!==sayId){return}
+    curAudio=a;a.playbackRate=F?1.04:1;
+    a.onended=a.onerror=()=>{speaking=false;lastSpoke=Date.now()};
+    await a.play();
+  }catch(e){speaking=false;if(id===sayId)sayBrowser(t)}
+}
+function status(t){$('status').textContent=t}
+
+async function typeOut(el,text){for(let i=0;i<=text.length;i++){el.textContent=text.slice(0,i);log.scrollTop=log.scrollHeight;await new Promise(r=>setTimeout(r,14))}}
+
+async function boot(){
+  $('boot').style.display='none';
+  status('rebooting...');talk=1;
+  const line=BOOT[Math.floor(Math.random()*BOOT.length)].replace('{who}',cfg.who);
+  say(line);
+  const el=add('j','');await typeOut(el,line);
+  history=[{role:'assistant',content:line}];
+  status('online');talk=0;
+  if(!cfg.key){add('j e','Language core not linked yet. Open Config and add a free Groq API key so I can think properly.')}
+}
+
+async function ask(text){
+  if(busy||!text.trim())return;
+  const sw=routeSwitch(text);if(sw){switchTo(sw);return}
+  if(!cfg.key){add('j e','No API key, '+cfg.who+'. Open Config to link my language core.');return}
+  busy=true;add('u',text);history.push({role:'user',content:text});
+  status('processing...');talk=.6;
+  const out=add('j','...');
+  try{
+    const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.key},
+      body:JSON.stringify({model:cfg.model,temperature:.8,max_tokens:500,messages:[{role:'system',content:SYSTEM()},...history.slice(-20)]})});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error&&d.error.message||('HTTP '+r.status));
+    const reply=d.choices[0].message.content.trim();
+    history.push({role:'assistant',content:reply});
+    say(reply);await typeOut(out,reply);
+  }catch(e){out.parentElement.classList.add('e');out.textContent='Connection fault: '+e.message+'. Check the key and model in Config.';history.pop()}
+  busy=false;talk=0;status('online');
+}
+
+$('f').onsubmit=e=>{e.preventDefault();const v=$('q').value;$('q').value='';ask(v)};
+function renderChips(){$('chips').innerHTML='';CHIPS[mode].forEach(c=>{const b=document.createElement('button');b.textContent=c;b.onclick=()=>ask(c);$('chips').appendChild(b)})}renderChips();
+$('bootBtn').onclick=boot;
+
+// persona switching
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const THEME={jarvis:[79,216,255],friday:[255,106,61]};
+const LOAD={friday:['Combat core','Threat assessment','Target acquisition','Weapons systems','Repulsor calibration','Flight stabilization','Tactical overlay','Damage mapping'],jarvis:['Language core','Protocol archive','Suit diagnostics','Home systems','Stark Industries link']};
+let fadeId=0;
+function fade(to,ms){const from=col.slice(),t0=performance.now(),id=++fadeId,r=document.documentElement.style;(function step(n){if(id!==fadeId)return;let k=Math.min(1,(n-t0)/ms);k=k*k*(3-2*k);col=from.map((v,i)=>Math.round(v+(to[i]-v)*k));r.setProperty('--cy','rgb('+col+')');r.setProperty('--line','rgba('+col+',.28)');r.setProperty('--ice','rgb('+col.map(v=>Math.round(v+(255-v)*.82))+')');if(k<1)requestAnimationFrame(step)})(t0)}
+function routeSwitch(t){const m=/\b(switch|change|swap|activate|bring|go)\b.{0,20}\b(jarvis|friday)\b/i.exec(t);if(!m)return null;const n=m[2].toLowerCase();return n!==mode?n:null}
+async function switchTo(n){
+  if(busy)return;busy=true;talk=1;status('switching...');
+  const L=LOAD[n],f=n==='friday';
+  const intro=f?'Switching to Friday. Loading combat and specialized modules.':'Returning control to Jarvis. Restoring standard systems.';
+  say(intro);add('j',intro);
+  fade(THEME[n],L.length*420+500);
+  const box=add('j','');box.style.fontSize='14px';box.style.fontFamily='monospace';
+  let txt='';
+  for(const m of L){for(let p=0;p<=8;p++){box.textContent=txt+'['+'\u2588'.repeat(p)+'\u2591'.repeat(8-p)+'] '+m;log.scrollTop=log.scrollHeight;await sleep(48)}txt+='[\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588] '+m+' ... OK\n'}
+  box.textContent=txt.trim();
+  mode=n;$('title').textContent=f?'F.R.I.D.A.Y.':'J.A.R.V.I.S.';document.title=$('title').textContent;renderChips();
+  const hi=f?'Friday online, boss. Combat suite armed and ready. Who are we hitting first?':'Jarvis back online, '+cfg.who+'. Standing by.';
+  history.push({role:'assistant',content:hi});say(hi);await typeOut(add('j',''),hi);
+  talk=0;busy=false;status(f?'friday online':'online');
+}
+
+// wake word + voice input
+const who=()=>mode==='friday'?'boss':cfg.who;
+function handleSpeech(raw){
+  const t=raw.trim();
+  const m=/^(?:(?:hey|hi|okay|ok)\s+)?(jarvis|friday)\b[,.!?\s]*(.*)$/i.exec(t);
+  if(m){const name=m[1].toLowerCase(),rest=m[2].trim();
+    if(name!==mode){switchTo(name).then(()=>{if(rest)ask(rest)});return}
+    if(rest){armed=false;ask(rest);return}
+    armed=true;say('Yes, '+who()+'?');status('listening...');return}
+  if(armed||!wakeOn){armed=false;ask(t)}
+}
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+if(SR){
+  const rec=new SR();rec.lang='en-US';rec.continuous=true;rec.interimResults=false;
+  rec.onresult=e=>{const r=e.results[e.results.length-1];if(!r.isFinal||speaking||Date.now()-lastSpoke<800)return;handleSpeech(r[0].transcript);if(!wakeOn){try{rec.stop()}catch(x){}$('mic').classList.remove('on')}};
+  rec.onend=()=>{if(wakeOn)setTimeout(()=>{try{rec.start()}catch(x){}},300)};
+  rec.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){wakeOn=false;$('wake').classList.remove('on');add('j e','Microphone access was denied, '+who()+'. Allow it in your browser settings.')}};
+  $('mic').onclick=()=>{armed=true;$('mic').classList.add('on');try{rec.start()}catch(x){}};
+  $('wake').onclick=()=>{wakeOn=!wakeOn;$('wake').classList.toggle('on',wakeOn);if(wakeOn){try{rec.start()}catch(x){}status('say "Hey Jarvis"')}else{armed=false;try{rec.stop()}catch(x){}status('online')}};
+}else{$('mic').style.display='none';$('wake').style.display='none'}
+
+// settings
+$('cfg').onclick=()=>{$('key').value=cfg.key;$('model').value=cfg.model;$('who').value=cfg.who;$('voice').checked=cfg.voice;$('dlg').showModal()};
+$('save').onclick=()=>{cfg.key=$('key').value.trim();cfg.model=$('model').value.trim()||'llama-3.3-70b-versatile';cfg.who=$('who').value.trim()||'sir';cfg.voice=$('voice').checked;store.set('j_key',cfg.key);store.set('j_model',cfg.model);store.set('j_who',cfg.who);store.set('j_voice',cfg.voice?'1':'0')};
+$('clr').onclick=()=>{history=[];log.innerHTML='';store.set('j_key','');cfg.key='';$('key').value='';$('dlg').close()};
+
+// HUD orb
+const cv=$('orb'),cx=cv.getContext('2d');let t=0;
+function size(){const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;cv.width=r.width*d;cv.height=r.height*d}
+addEventListener('resize',size);size();
+function ring(R,w,a0,a1,rot,al,c){cx.beginPath();cx.arc(0,0,R,a0+rot,a1+rot);cx.lineWidth=w;cx.strokeStyle=`rgba(${c||BLUE},${al})`;cx.stroke()}
+function draw(){
+  t+=mode==='friday'?.018:.012;const W=cv.width,H=cv.height,S=Math.min(W,H)/2;
+  cx.clearRect(0,0,W,H);cx.save();cx.translate(W/2,H/2);
+  const amp=(talk||(speaking?.8:0)),pulse=1+Math.sin(t*6)*.04*(amp+.3);
+  const g=cx.createRadialGradient(0,0,0,0,0,S*.5*pulse);g.addColorStop(0,'rgba(255,255,255,.95)');g.addColorStop(.35,`rgba(${col},.55)`);g.addColorStop(1,`rgba(${col},0)`);
+  cx.fillStyle=g;cx.beginPath();cx.arc(0,0,S*.5*pulse,0,7);cx.fill();
+  cx.lineCap='round';
+  ring(S*.62,S*.02,0,5.2,t,.9,col);ring(S*.72,S*.012,0,2,-t*1.4,.8,col);ring(S*.72,S*.012,3,5,-t*1.4,.8,col);
+  const mid=col.map((v,i)=>(v+BLUE[i])>>1);ring(S*.84,S*.03,0,1.2,t*.7,.9,mid);ring(S*.84,S*.03,2.1,3.3,t*.7,.9,mid);ring(S*.84,S*.03,4.2,5.4,t*.7,.9,mid);
+  ring(S*.95,S*.008,0,6.3,0,.35);
+  for(let i=0;i<48;i++){const a=i/48*6.283+t*.3,l=i%4?S*.025:S*.06;cx.beginPath();cx.moveTo(Math.cos(a)*S*.98,Math.sin(a)*S*.98);cx.lineTo(Math.cos(a)*(S*.98-l),Math.sin(a)*(S*.98-l));cx.lineWidth=1;cx.strokeStyle='rgba(79,216,255,.5)';cx.stroke()}
+  cx.restore();requestAnimationFrame(draw)}
+draw();
+if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+if(window.speechSynthesis)speechSynthesis.getVoices();
+</script>
+</body>
+</html>
