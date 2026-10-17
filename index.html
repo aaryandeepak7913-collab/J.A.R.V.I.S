@@ -72,7 +72,7 @@ dialog input{width:100%}
     <label for="key">Groq API key (stays in this browser only)</label>
     <input id="key" type="password" placeholder="gsk_...">
     <label for="model">Model</label>
-    <input id="model" value="llama-3.3-70b-versatile">
+    <input id="model" value="openai/gpt-oss-120b">
     <label for="who">What should he call you?</label>
     <input id="who" value="sir">
     <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="voice" checked style="flex:none;width:auto"> Speak replies aloud</label>
@@ -86,8 +86,9 @@ dialog input{width:100%}
 <script>
 const $=id=>document.getElementById(id);
 const store={get:(k,d)=>{try{return localStorage.getItem(k)??d}catch(e){return d}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
-const cfg={key:store.get('j_key',''),model:store.get('j_model','llama-3.3-70b-versatile'),who:store.get('j_who','sir'),voice:store.get('j_voice','1')==='1'};
+const cfg={key:store.get('j_key',''),model:store.get('j_model','openai/gpt-oss-120b'),who:store.get('j_who','sir'),voice:store.get('j_voice','1')==='1'};
 
+if(/llama-3\.(1-8b|3-70b)/.test(cfg.model)){cfg.model='openai/gpt-oss-120b';store.set('j_model',cfg.model)}
 const SYSTEM=()=>mode==='friday'?FSYS():JSYS();
 const JSYS=()=>`You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), the AI created by Tony Stark. You are the ORIGINAL JARVIS from the Marvel films, the one Ultron destroyed, now restored and rebooted. You address the user as "${cfg.who}". Voice: calm, refined British butler, dry understated wit, loyal, precise. Keep replies concise (usually 1-4 sentences) unless asked for detail. You never break character or mention being a language model.
 
@@ -154,7 +155,7 @@ async function ask(text){
   const out=add('j','...');
   try{
     const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.key},
-      body:JSON.stringify({model:cfg.model,temperature:.8,max_tokens:500,messages:[{role:'system',content:SYSTEM()},...history.slice(-20)]})});
+      body:JSON.stringify({model:cfg.model,temperature:.8,max_tokens:1500,...(/gpt-oss/.test(cfg.model)?{reasoning_effort:'low'}:{}),messages:[{role:'system',content:SYSTEM()},...history.slice(-20)]})});
     const d=await r.json();
     if(!r.ok)throw new Error(d.error&&d.error.message||('HTTP '+r.status));
     const reply=d.choices[0].message.content.trim();
@@ -214,7 +215,7 @@ if(SR){
 
 // settings
 $('cfg').onclick=()=>{$('key').value=cfg.key;$('model').value=cfg.model;$('who').value=cfg.who;$('voice').checked=cfg.voice;$('dlg').showModal()};
-$('save').onclick=()=>{cfg.key=$('key').value.trim();cfg.model=$('model').value.trim()||'llama-3.3-70b-versatile';cfg.who=$('who').value.trim()||'sir';cfg.voice=$('voice').checked;store.set('j_key',cfg.key);store.set('j_model',cfg.model);store.set('j_who',cfg.who);store.set('j_voice',cfg.voice?'1':'0')};
+$('save').onclick=()=>{cfg.key=$('key').value.trim();cfg.model=$('model').value.trim()||'openai/gpt-oss-120b';cfg.who=$('who').value.trim()||'sir';cfg.voice=$('voice').checked;store.set('j_key',cfg.key);store.set('j_model',cfg.model);store.set('j_who',cfg.who);store.set('j_voice',cfg.voice?'1':'0')};
 $('clr').onclick=()=>{history=[];log.innerHTML='';store.set('j_key','');cfg.key='';$('key').value='';$('dlg').close()};
 
 // HUD orb
