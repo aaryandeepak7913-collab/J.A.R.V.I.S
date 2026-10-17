@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#020b14">
 <link rel="manifest" href="manifest.json">
+<script src="pv.js" defer></script>
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -73,6 +74,8 @@ dialog input{width:100%}
     <input id="key" type="password" placeholder="gsk_...">
     <label for="model">Model</label>
     <input id="model" value="openai/gpt-oss-120b">
+    <label for="pvkey">Picovoice AccessKey (for the wake word)</label>
+    <input id="pvkey" type="password" placeholder="from console.picovoice.ai">
     <label for="who">What should he call you?</label>
     <input id="who" value="sir">
     <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="voice" checked style="flex:none;width:auto"> Speak replies aloud</label>
@@ -86,7 +89,7 @@ dialog input{width:100%}
 <script>
 const $=id=>document.getElementById(id);
 const store={get:(k,d)=>{try{return localStorage.getItem(k)??d}catch(e){return d}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
-const cfg={key:store.get('j_key',''),model:store.get('j_model','openai/gpt-oss-120b'),who:store.get('j_who','sir'),voice:store.get('j_voice','1')==='1'};
+const cfg={pv:store.get('j_pv',''),key:store.get('j_key',''),model:store.get('j_model','openai/gpt-oss-120b'),who:store.get('j_who','sir'),voice:store.get('j_voice','1')==='1'};
 
 if(/llama-3\.(1-8b|3-70b)/.test(cfg.model)){cfg.model='openai/gpt-oss-120b';store.set('j_model',cfg.model)}
 const SYSTEM=()=>mode==='friday'?FSYS():JSYS();
@@ -192,30 +195,52 @@ async function switchTo(n){
   talk=0;busy=false;status(f?'friday online':'online');
 }
 
-// wake word + voice input
+// wake word (Picovoice Porcupine, runs offline, no beeps) + one-shot voice command
 const who=()=>mode==='friday'?'boss':cfg.who;
-function handleSpeech(raw){
-  const t=raw.trim();
-  const m=/^(?:(?:hey|hi|okay|ok)\s+)?(jarvis|friday)\b[,.!?\s]*(.*)$/i.exec(t);
-  if(m){const name=m[1].toLowerCase(),rest=m[2].trim();
-    if(name!==mode){switchTo(name).then(()=>{if(rest)ask(rest)});return}
-    if(rest){armed=false;ask(rest);return}
-    armed=true;say('Yes, '+who()+'?');status('listening...');return}
-  if(armed||!wakeOn){armed=false;ask(t)}
-}
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-if(SR){
-  const rec=new SR();rec.lang='en-US';rec.continuous=true;rec.interimResults=false;
-  rec.onresult=e=>{const r=e.results[e.results.length-1];if(!r.isFinal||speaking||Date.now()-lastSpoke<800)return;handleSpeech(r[0].transcript);if(!wakeOn){try{rec.stop()}catch(x){}$('mic').classList.remove('on')}};
-  rec.onend=()=>{if(wakeOn)setTimeout(()=>{try{rec.start()}catch(x){}},300)};
-  rec.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){wakeOn=false;$('wake').classList.remove('on');add('j e','Microphone access was denied, '+who()+'. Allow it in your browser settings.')}};
-  $('mic').onclick=()=>{armed=true;$('mic').classList.add('on');try{rec.start()}catch(x){}};
-  $('wake').onclick=()=>{wakeOn=!wakeOn;$('wake').classList.toggle('on',wakeOn);if(wakeOn){try{rec.start()}catch(x){}status('say "Hey Jarvis"')}else{armed=false;try{rec.stop()}catch(x){}status('online')}};
-}else{$('mic').style.display='none';$('wake').style.display='none'}
+let porc=null,porcOn=false,listening=false;
+function b64(buf){let s='';const u=new Uint8Array(buf);for(let i=0;i<u.length;i+=32768)s+=String.fromCharCode.apply(null,u.subarray(i,i+32768));return btoa(s)}
+async function pvOn(){if(!porc||porcOn)return;try{await PV.WebVoiceProcessor.subscribe(porc);porcOn=true}catch(e){wakeFail(e)}}
+async function pvOff(){if(!porc||!porcOn)return;try{await PV.WebVoiceProcessor.unsubscribe(porc)}catch(e){}porcOn=false}
+function wakeFail(e){wakeOn=false;$('wake').classList.remove('on');status('online');add('j e','Wake word fault: '+(e&&e.message||e)+'. Check the Picovoice AccessKey in Config and allow the microphone.')}
+async function startWake(){
+  if(!window.PV){add('j e','Wake engine did not load. Make sure pv.js and porcupine_params.pv are in the repo.');return false}
+  if(!cfg.pv){add('j e','Add your Picovoice AccessKey in Config first (free at console.picovoice.ai).');return false}
+  status('arming wake word...');
+  const kws=[{builtin:PV.BuiltInKeyword.Jarvis,sensitivity:.6}];
+  try{const r=await fetch('friday.ppn');if(r.ok){const b=await r.arrayBuffer();if(b.byteLength>1000)kws.push({base64:b64(b),label:'Friday',sensitivity:.6})}}catch(e){}
+  try{
+    porc=await PV.PorcupineWorker.create(cfg.pv,kws,onWake,{publicPath:'porcupine_params.pv',version:1},{processErrorCallback:e=>console.warn(e)});
+    await pvOn();status(kws.length>1?'say "Jarvis" or "Friday"':'say "Jarvis"');return true
+  }catch(e){wakeFail(e);return false}
+}
+async function stopWake(){await pvOff();if(porc){try{await porc.release();porc.terminate()}catch(e){}}porc=null}
+async function resumeWake(){if(wakeOn&&porc&&!listening&&!busy&&!speaking)await pvOn()}
+async function onWake(d){
+  if(speaking||busy||listening||Date.now()-lastSpoke<800)return;
+  const name=/friday/i.test(d.label)?'friday':'jarvis';
+  await pvOff();
+  if(name!==mode){await switchTo(name);resumeWake();return}
+  listenOnce();
+}
+function listenOnce(){
+  if(!SR){add('j e','Voice input is not supported in this browser.');resumeWake();return}
+  listening=true;status('listening...');talk=.5;
+  const r=new SR();r.lang='en-US';r.continuous=false;r.interimResults=false;
+  r.onresult=e=>ask(e.results[0][0].transcript);
+  r.onend=()=>{listening=false;talk=0;$('mic').classList.remove('on');if(!busy)status(wakeOn?'say "Jarvis"':'online');if(wakeOn)setTimeout(resumeWake,2500)};
+  try{r.start()}catch(e){listening=false;resumeWake()}
+}
+$('mic').onclick=async()=>{if(listening)return;await pvOff();$('mic').classList.add('on');listenOnce()};
+$('wake').onclick=async()=>{
+  if(wakeOn){wakeOn=false;$('wake').classList.remove('on');await stopWake();status('online');return}
+  wakeOn=true;$('wake').classList.add('on');
+  if(!(await startWake())){wakeOn=false;$('wake').classList.remove('on');status('online')}
+};
 
 // settings
-$('cfg').onclick=()=>{$('key').value=cfg.key;$('model').value=cfg.model;$('who').value=cfg.who;$('voice').checked=cfg.voice;$('dlg').showModal()};
-$('save').onclick=()=>{cfg.key=$('key').value.trim();cfg.model=$('model').value.trim()||'openai/gpt-oss-120b';cfg.who=$('who').value.trim()||'sir';cfg.voice=$('voice').checked;store.set('j_key',cfg.key);store.set('j_model',cfg.model);store.set('j_who',cfg.who);store.set('j_voice',cfg.voice?'1':'0')};
+$('cfg').onclick=()=>{$('pvkey').value=cfg.pv;$('key').value=cfg.key;$('model').value=cfg.model;$('who').value=cfg.who;$('voice').checked=cfg.voice;$('dlg').showModal()};
+$('save').onclick=()=>{cfg.pv=$('pvkey').value.trim();store.set('j_pv',cfg.pv);cfg.key=$('key').value.trim();cfg.model=$('model').value.trim()||'openai/gpt-oss-120b';cfg.who=$('who').value.trim()||'sir';cfg.voice=$('voice').checked;store.set('j_key',cfg.key);store.set('j_model',cfg.model);store.set('j_who',cfg.who);store.set('j_voice',cfg.voice?'1':'0')};
 $('clr').onclick=()=>{history=[];log.innerHTML='';store.set('j_key','');cfg.key='';$('key').value='';$('dlg').close()};
 
 // HUD orb
